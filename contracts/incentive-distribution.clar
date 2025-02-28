@@ -70,3 +70,45 @@
     (get-symbol () (response (string-ascii 32) uint))
   )
 )
+
+;; Private functions
+(define-private (is-contract-owner)
+  (is-eq tx-sender contract-owner)
+)
+
+(define-private (calculate-fee (amount uint))
+  (/ (* amount PROTOCOL-FEE-PERCENT) u100)
+)
+
+(define-private (update-provider-revenue (provider principal) (payment-amount uint) (segments-count uint))
+  (let ((existing-revenue (default-to 
+                            { total-earned: u0, pending-withdrawals: u0, last-withdrawal: u0, total-segments-used: u0 }
+                            (map-get? provider-revenue { provider: provider }))))
+    (map-set provider-revenue
+             { provider: provider }
+             {
+               total-earned: (+ (get total-earned existing-revenue) payment-amount),
+               pending-withdrawals: (+ (get pending-withdrawals existing-revenue) payment-amount),
+               last-withdrawal: (get last-withdrawal existing-revenue),
+               total-segments-used: (+ (get total-segments-used existing-revenue) segments-count)
+             }
+    )
+  )
+)
+
+;; Bitcoin anchoring function - integrates with Stacks blockchain for Bitcoin security
+(define-private (anchor-to-bitcoin (payment-id (string-ascii 64)))
+  (let ((block-info (get-block-info? burnchain-header-hash (- block-height u1))))
+    (match (map-get? payments { payment-id: payment-id })
+      payment (if (get processed payment)
+                false
+                (map-set payments
+                        { payment-id: payment-id }
+                        (merge payment {
+                          btc-block-height: (some block-height),
+                          btc-block-hash: block-info
+                        })))
+      false
+    )
+  )
+)
