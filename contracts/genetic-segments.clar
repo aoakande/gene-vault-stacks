@@ -80,13 +80,16 @@
 )
 
 (define-private (add-to-provider-segments (owner principal) (segment-id (string-ascii 64)))
-  (match (map-get? provider-segments { owner: owner })
-    existing-entry (map-set provider-segments 
-                            { owner: owner } 
-                            { segment-ids: (append (get segment-ids existing-entry) segment-id) })
-    (map-set provider-segments 
-             { owner: owner } 
-             { segment-ids: (list segment-id) })
+  (let ((existing-entry (map-get? provider-segments { owner: owner })))
+    (match existing-entry
+      entry (map-set provider-segments 
+                     { owner: owner } 
+                     { segment-ids: (unwrap-panic (as-max-len? (append (get segment-ids entry) segment-id) u100)) })
+      (map-set provider-segments 
+               { owner: owner } 
+               { segment-ids: (list segment-id) })
+    )
+    true
   )
 )
 
@@ -119,7 +122,7 @@
       )
 
       ;; Update the provider's segments list
-      (try! (as-contract (add-to-provider-segments tx-sender segment-id)))
+      (add-to-provider-segments tx-sender segment-id)
 
       ;; Increment total segments counter
       (var-set total-segments (+ (var-get total-segments) u1))
@@ -181,30 +184,34 @@
                 (segments-used (list 100 (string-ascii 64)))
                 (query-type (string-ascii 20))
                 (result-hash (buff 32)))
-  ;; Verify access to all segments
-  (asserts! (fold check-all-access segments-used true) (err err-not-authorized))
+  (let ((has-access (fold check-segment-access segments-used true)))
+    ;; Verify access to all segments
+    (asserts! has-access (err err-not-authorized))
 
-  ;; Record the query
-  (map-set research-queries
-           { query-id: query-id }
-           {
-             researcher: tx-sender,
-             segments-used: segments-used,
-             query-type: query-type,
-             executed-at: block-height,
-             result-hash: result-hash
-           }
+    ;; Record the query
+    (map-set research-queries
+             { query-id: query-id }
+             {
+               researcher: tx-sender,
+               segments-used: segments-used,
+               query-type: query-type,
+               executed-at: block-height,
+               result-hash: result-hash
+             }
+    )
+
+    ;; Increment queries counter
+    (var-set total-queries (+ (var-get total-queries) u1))
+
+    (ok query-id)
   )
-
-  ;; Increment queries counter
-  (var-set total-queries (+ (var-get total-queries) u1))
-
-  (ok query-id)
 )
 
 ;; Helper to check access to all segments in a list
-(define-private (check-all-access (segment-id (string-ascii 64)) (has-access bool))
-  (and has-access (has-segment-access segment-id tx-sender))
+(define-private (check-segment-access (segment-id (string-ascii 64)) (has-access bool))
+  (if has-access
+      (has-segment-access segment-id tx-sender)
+      false)
 )
 
 ;; Update segment metadata (only owner can do this)
@@ -233,4 +240,48 @@
       (ok true)
     )
   )
+)
+
+;; Read-only Functions
+
+;; Get segment information (if public or has access)
+(define-read-only (get-segment-info (segment-id (string-ascii 64)))
+  (let ((segment (map-get? genomic-segments { segment-id: segment-id })))
+    (match segment
+      existing-segment (if (or (is-eq (get access-level existing-segment) u1)  ;; Public
+                               (has-segment-access segment-id tx-sender))    ;; Has access
+                           (ok existing-segment)
+                           (err err-not-authorized))
+      (err err-no-segment)
+    )
+  )
+)
+
+;; Check if a researcher has access to a segment
+(define-read-only (check-access (segment-id (string-ascii 64)) (researcher principal))
+  (ok (has-segment-access segment-id researcher))
+)
+
+;; Get all segments owned by a provider
+(define-read-only (get-provider-segments (provider principal))
+  (match (map-get? provider-segments { owner: provider })
+    entry (ok (get segment-ids entry))
+    (ok (list))
+  )
+)
+
+;; Get details about a research query
+(define-read-only (get-query-info (query-id (string-ascii 64)))
+  (match (map-get? research-queries { query-id: query-id })
+    query-info (ok query-info)
+    (err err-no-segment)
+  )
+)
+
+;; Get system statistics
+(define-read-only (get-stats)
+  (ok {
+    total-segments: (var-get total-segments),
+    total-queries: (var-get total-queries)
+  })
 )
