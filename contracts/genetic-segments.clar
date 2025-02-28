@@ -56,3 +56,36 @@
 ;; Counters for governance and statistics
 (define-data-var total-segments uint u0)
 (define-data-var total-queries uint u0)
+
+;; Private Functions
+(define-private (is-owner)
+  (is-eq tx-sender contract-owner)
+)
+
+(define-private (is-segment-owner (segment-id (string-ascii 64)))
+  (match (map-get? genomic-segments { segment-id: segment-id })
+    segment (is-eq tx-sender (get owner segment))
+    false
+  )
+)
+
+(define-private (has-segment-access (segment-id (string-ascii 64)) (user principal))
+  (or
+    (is-segment-owner segment-id)
+    (match (map-get? segment-access { segment-id: segment-id, researcher: user })
+      access-info (< block-height (get expires-at access-info))
+      false
+    )
+  )
+)
+
+(define-private (add-to-provider-segments (owner principal) (segment-id (string-ascii 64)))
+  (match (map-get? provider-segments { owner: owner })
+    existing-entry (map-set provider-segments 
+                            { owner: owner } 
+                            { segment-ids: (append (get segment-ids existing-entry) segment-id) })
+    (map-set provider-segments 
+             { owner: owner } 
+             { segment-ids: (list segment-id) })
+  )
+)
