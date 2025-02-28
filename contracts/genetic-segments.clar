@@ -128,3 +128,50 @@
     )
   )
 )
+
+;; Grant access to a researcher for a specific segment
+(define-public (grant-access 
+                (segment-id (string-ascii 64)) 
+                (researcher principal)
+                (duration uint)
+                (purpose (string-utf8 256)))
+  (let ((segment (map-get? genomic-segments { segment-id: segment-id })))
+    ;; Verify the segment exists and sender is the owner
+    (asserts! (is-some segment) (err err-no-segment))
+    (asserts! (is-segment-owner segment-id) (err err-not-authorized))
+
+    ;; Calculate expiry based on current block height
+    (let ((expiry-block (+ block-height duration)))
+      ;; Grant access
+      (map-set segment-access
+               { segment-id: segment-id, researcher: researcher }
+               {
+                 granted-by: tx-sender,
+                 granted-at: block-height,
+                 expires-at: expiry-block,
+                 purpose: purpose
+               }
+      )
+
+      (ok true)
+    )
+  )
+)
+
+;; Revoke previously granted access
+(define-public (revoke-access (segment-id (string-ascii 64)) (researcher principal))
+  (let ((access-info (map-get? segment-access { segment-id: segment-id, researcher: researcher })))
+    ;; Verify access exists and sender is the segment owner
+    (asserts! (is-some access-info) (err err-no-segment))
+    (asserts! (is-segment-owner segment-id) (err err-not-authorized))
+
+    ;; Revoke by setting expiry to current block
+    (map-set segment-access
+             { segment-id: segment-id, researcher: researcher }
+             (merge (unwrap-panic access-info) { expires-at: block-height })
+    )
+
+    (ok true)
+  )
+)
+
