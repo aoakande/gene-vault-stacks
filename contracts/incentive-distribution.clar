@@ -181,3 +181,60 @@
   )
 )
 
+;; Register research citations to track impact
+(define-public (register-citation
+                (research-id (string-ascii 64))
+                (data-providers (list 20 principal))
+                (citation-count uint))
+  (let ((existing-research (map-get? research-impact { research-id: research-id })))
+    (asserts! (> (len data-providers) u0) (err ERR-INVALID-PARAMETERS))
+    ;; Update or create research impact record
+    (match existing-research
+      prior-record (map-set research-impact
+                           { research-id: research-id }
+                           {
+                             researcher: tx-sender,
+                             data-providers: data-providers,
+                             citation-count: (+ (get citation-count prior-record) citation-count),
+                             impact-score: (+ (get impact-score prior-record) (* citation-count u10)),
+                             last-updated: block-height
+                           })
+      ;; New record
+      (map-set research-impact
+               { research-id: research-id }
+               {
+                 researcher: tx-sender,
+                 data-providers: data-providers,
+                 citation-count: citation-count,
+                 impact-score: (* citation-count u10),
+                 last-updated: block-height
+               })
+    )
+    ;; Update total citations
+    (var-set total-citations (+ (var-get total-citations) citation-count))
+    ;; Distribute impact bonuses to data providers (simplified implementation)
+    (let ((impact-bonus (/ (* citation-count u1000) (len data-providers))))
+      ;; Use fold instead of map to process each provider
+      (fold distribute-impact-bonus data-providers true)
+      (ok research-id)
+    )
+  )
+)
+
+;; Helper to distribute impact bonuses to providers
+(define-private (distribute-impact-bonus (provider principal) (prior-result bool))
+  (let ((existing-revenue (default-to 
+                            { total-earned: u0, pending-withdrawals: u0, last-withdrawal: u0, total-segments-used: u0 }
+                            (map-get? provider-revenue { provider: provider })))
+        ;; Calculate bonus per provider - moved from calling function
+        (bonus (/ (* (var-get total-citations) u1000) u1)))
+    (map-set provider-revenue
+             { provider: provider }
+             (merge existing-revenue {
+               total-earned: (+ (get total-earned existing-revenue) bonus),
+               pending-withdrawals: (+ (get pending-withdrawals existing-revenue) bonus)
+             })
+    )
+    true
+  )
+)
