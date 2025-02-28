@@ -9,6 +9,9 @@ boot_contracts = ["pox", "costs-v2", "bns"]
 [contracts.genetic-segments]
 path = "contracts/genetic-segments.clar"
 
+[contracts.incentive-distribution]
+path = "contracts/incentive-distribution.clar"
+
 [repl]
 costs_version = 2
 parser_version = 2
