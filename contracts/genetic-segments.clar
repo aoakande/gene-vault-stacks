@@ -175,3 +175,62 @@
   )
 )
 
+;; Record a research query that uses specific segments
+(define-public (record-research-query
+                (query-id (string-ascii 64))
+                (segments-used (list 100 (string-ascii 64)))
+                (query-type (string-ascii 20))
+                (result-hash (buff 32)))
+  ;; Verify access to all segments
+  (asserts! (fold check-all-access segments-used true) (err err-not-authorized))
+
+  ;; Record the query
+  (map-set research-queries
+           { query-id: query-id }
+           {
+             researcher: tx-sender,
+             segments-used: segments-used,
+             query-type: query-type,
+             executed-at: block-height,
+             result-hash: result-hash
+           }
+  )
+
+  ;; Increment queries counter
+  (var-set total-queries (+ (var-get total-queries) u1))
+
+  (ok query-id)
+)
+
+;; Helper to check access to all segments in a list
+(define-private (check-all-access (segment-id (string-ascii 64)) (has-access bool))
+  (and has-access (has-segment-access segment-id tx-sender))
+)
+
+;; Update segment metadata (only owner can do this)
+(define-public (update-segment-access
+                (segment-id (string-ascii 64))
+                (new-access-level uint)
+                (new-consent-duration uint))
+  (let ((segment (map-get? genomic-segments { segment-id: segment-id })))
+    ;; Verify the segment exists and sender is the owner
+    (asserts! (is-some segment) (err err-no-segment))
+    (asserts! (is-segment-owner segment-id) (err err-not-authorized))
+    (asserts! (and (>= new-access-level u1) (<= new-access-level u3)) (err err-invalid-segment))
+
+    ;; Calculate new expiry
+    (let ((new-expiry (+ block-height new-consent-duration)))
+      ;; Update the segment
+      (map-set genomic-segments
+               { segment-id: segment-id }
+               (merge (unwrap-panic segment)
+                     {
+                       access-level: new-access-level,
+                       consent-expiry: new-expiry
+                     })
+      )
+
+      (ok true)
+    )
+  )
+)
