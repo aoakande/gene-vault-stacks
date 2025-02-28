@@ -112,3 +112,47 @@
     )
   )
 )
+
+;; Public functions
+
+;; Process a payment for data usage
+(define-public (process-payment 
+                (payment-id (string-ascii 64))
+                (recipient principal)
+                (segment-ids (list 20 (string-ascii 64)))
+                (amount uint))
+  (let ((fee (calculate-fee amount))
+        (provider-amount (- amount fee)))
+    ;; Validate parameters
+    (asserts! (>= amount MIN-PAYMENT) (err ERR-INVALID-PARAMETERS))
+    (asserts! (> (len segment-ids) u0) (err ERR-INVALID-PARAMETERS))
+    (asserts! (is-none (map-get? payments { payment-id: payment-id })) (err ERR-ALREADY-PROCESSED))
+    ;; Process STX transfer
+    (let ((transfer-result (stx-transfer? amount tx-sender (as-contract tx-sender))))
+      (asserts! (is-ok transfer-result) (err ERR-INSUFFICIENT-FUNDS)))
+    ;; Record payment details
+    (map-set payments
+             { payment-id: payment-id }
+             {
+               payer: tx-sender,
+               recipient: recipient,
+               amount: amount,
+               segment-ids: segment-ids,
+               created-at: block-height,
+               processed: false,
+               btc-block-height: none,
+               btc-block-hash: none
+             }
+    )
+    ;; Update provider revenue tracking
+    (update-provider-revenue recipient provider-amount (len segment-ids))
+    ;; Update protocol stats
+    (var-set protocol-treasury (+ (var-get protocol-treasury) fee))
+    (var-set total-payments (+ (var-get total-payments) u1))
+    (var-set total-payment-volume (+ (var-get total-payment-volume) amount))
+    ;; Anchor to Bitcoin for security
+    (anchor-to-bitcoin payment-id)
+    (ok payment-id)
+  )
+)
+
