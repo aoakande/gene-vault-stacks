@@ -238,3 +238,71 @@
     true
   )
 )
+
+;; Provider withdraws earned STX
+(define-public (withdraw-earnings)
+  (let ((provider-info (default-to 
+                          { total-earned: u0, pending-withdrawals: u0, last-withdrawal: u0, total-segments-used: u0 }
+                          (map-get? provider-revenue { provider: tx-sender }))))
+    (asserts! (> (get pending-withdrawals provider-info) u0) (err ERR-INSUFFICIENT-FUNDS))
+    (let ((withdraw-amount (get pending-withdrawals provider-info)))
+      ;; Transfer STX from contract to provider
+      (let ((transfer-result (as-contract (stx-transfer? withdraw-amount tx-sender tx-sender))))
+        (asserts! (is-ok transfer-result) (err ERR-INSUFFICIENT-FUNDS)))
+      ;; Update provider record
+      (map-set provider-revenue
+               { provider: tx-sender }
+               (merge provider-info {
+                 pending-withdrawals: u0,
+                 last-withdrawal: block-height
+               })
+      )
+      (ok withdraw-amount)
+    )
+  )
+)
+
+;; Read-only functions
+
+;; Get payment details
+(define-read-only (get-payment (payment-id (string-ascii 64)))
+  (map-get? payments { payment-id: payment-id })
+)
+
+;; Get provider revenue info
+(define-read-only (get-provider-info (provider principal))
+  (default-to 
+    { total-earned: u0, pending-withdrawals: u0, last-withdrawal: u0, total-segments-used: u0 }
+    (map-get? provider-revenue { provider: provider })
+  )
+)
+
+;; Get research impact details
+(define-read-only (get-research-impact (research-id (string-ascii 64)))
+  (map-get? research-impact { research-id: research-id })
+)
+
+;; Get protocol stats
+(define-read-only (get-protocol-stats)
+  {
+    treasury: (var-get protocol-treasury),
+    total-payments: (var-get total-payments),
+    payment-volume: (var-get total-payment-volume),
+    total-citations: (var-get total-citations)
+  }
+)
+
+;; Verify Bitcoin anchoring for a payment
+(define-read-only (verify-bitcoin-anchoring (payment-id (string-ascii 64)))
+  (match (map-get? payments { payment-id: payment-id })
+    payment (if (and (is-some (get btc-block-height payment))
+                     (is-some (get btc-block-hash payment)))
+               (ok {
+                 btc-block-height: (get btc-block-height payment),
+                 btc-block-hash: (get btc-block-hash payment),
+                 confirmations: (- block-height (default-to u0 (get btc-block-height payment)))
+               })
+               (err ERR-NOT-FOUND))
+    (err ERR-NOT-FOUND)
+  )
+)
