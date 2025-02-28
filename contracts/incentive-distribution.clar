@@ -156,3 +156,28 @@
   )
 )
 
+;; Complete payment by transferring STX to the recipient
+(define-public (complete-payment (payment-id (string-ascii 64)))
+  (let ((payment (unwrap! (map-get? payments { payment-id: payment-id }) (err ERR-NOT-FOUND))))
+    ;; Validate state
+    (asserts! (not (get processed payment)) (err ERR-ALREADY-PROCESSED))
+    (asserts! (is-some (get btc-block-height payment)) (err ERR-INVALID-PARAMETERS))
+    ;; Ensure Bitcoin confirmations
+    (asserts! (>= (- block-height (unwrap! (get btc-block-height payment) (err ERR-INVALID-PARAMETERS))) 
+                BTC-CONFIRMATIONS) 
+              (err ERR-INVALID-PARAMETERS))
+    ;; Calculate fee and provider amount
+    (let ((fee (calculate-fee (get amount payment)))
+          (provider-amount (- (get amount payment) fee)))
+      ;; Transfer STX to recipient
+      (let ((transfer-result (as-contract (stx-transfer? provider-amount tx-sender (get recipient payment)))))
+        (asserts! (is-ok transfer-result) (err ERR-INSUFFICIENT-FUNDS)))
+      ;; Mark payment as processed
+      (map-set payments
+               { payment-id: payment-id }
+               (merge payment { processed: true }))
+      (ok payment-id)
+    )
+  )
+)
+
