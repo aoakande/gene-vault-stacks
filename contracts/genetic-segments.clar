@@ -89,3 +89,42 @@
              { segment-ids: (list segment-id) })
   )
 )
+
+;; Public Functions
+
+;; Register a new genomic data segment
+(define-public (register-segment 
+                (segment-id (string-ascii 64)) 
+                (data-hash (buff 32)) 
+                (segment-type (string-ascii 20))
+                (access-level uint)
+                (consent-blocks uint))
+  (let ((existing-segment (map-get? genomic-segments { segment-id: segment-id })))
+    (asserts! (is-none existing-segment) (err err-segment-exists))
+    (asserts! (and (>= access-level u1) (<= access-level u3)) (err err-invalid-segment))
+
+    ;; Set the expiry block based on current block height plus the consent duration
+    (let ((expiry-block (+ block-height consent-blocks)))
+      ;; Register the segment
+      (map-set genomic-segments 
+               { segment-id: segment-id }
+               { 
+                 owner: tx-sender,
+                 data-hash: data-hash,
+                 segment-type: segment-type,
+                 created-at: block-height,
+                 access-level: access-level,
+                 consent-expiry: expiry-block
+               }
+      )
+
+      ;; Update the provider's segments list
+      (try! (as-contract (add-to-provider-segments tx-sender segment-id)))
+
+      ;; Increment total segments counter
+      (var-set total-segments (+ (var-get total-segments) u1))
+
+      (ok segment-id)
+    )
+  )
+)
